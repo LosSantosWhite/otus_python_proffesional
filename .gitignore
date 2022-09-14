@@ -1,3 +1,4 @@
 .idea/
 venv/
 01_advanced_basics/log_analyzer/logs/nginx-access-ui.log-20170630.log
+*.pyc
