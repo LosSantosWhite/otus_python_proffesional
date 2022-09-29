@@ -10,6 +10,7 @@ import gzip
 from collections import namedtuple, defaultdict
 from string import Template
 import os
+from statistics import median
 
 log_format = (
     "$remote_addr  $remote_user $http_x_real_ip [$time_local] $request $status $body_bytes_sent "
@@ -21,17 +22,14 @@ LOG_REQUEST_PATTERN = re.compile(r"^.+\[.+\] \"(.+)\" \d{3}.+ (\d+\.\d+)\n$")
 TEMPLATE = os.path.join("template", "report.html")
 
 DEFAULT_CONFIG = {
-    "log_analyzer": {
-        "REPORT_SIZE": 1000,
-        "REPORT_DIR": "./reports",
-        "LOG_DIR": "./logs",
-        "ALLOWED_INVALID_PART": 0.2,
-        "LOG_FILENAME": None,
-        "LOGGING_LEVEL": "INFO",
-    }
+    "report_size": 1000,
+    "report_dir": "./reports",
+    "log_dir": "./logs",
+    "allowed_invalid_part": 0.2,
+    "log_filename": None,
+    "logging_level": "INFO",
 }
 
-logger = logging.getLogger()
 
 log_params = namedtuple("log_params", ["url", "time"])
 
@@ -48,73 +46,42 @@ log_stat = namedtuple(
     ],
 )
 
-
-def init_config():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("-fc", "--file-config", default=DEFAULT_CONFIG)
-    args = parser.parse_args()
-    config = configparser.ConfigParser()
-    config.read("default_config.ini")
-    config.read(args.file_config)
-
-    logging.basicConfig(
-        format="[%(asctime)s] %(levelname)s %(message)s",
-        datefmt="%Y.%m.%d %H:%M:%S",
-        level="INFO",
-    )
-    return config
+file_params = namedtuple("file_params", ["file_date", "path", "extension"])
 
 
-def checking_log_file_ext(file_name, report=False):
-    """Проверка расширения файлов"""
+def find_last_log_file(log_dir):
+    last_log_file = None
     LOG_FILENAME_PATTERN = r"nginx-access-ui\.log-(\d{8})\.(gz|log)"
-    REPORT_FILENAME_PATTERN = r"report-\d{4}.\d{2}.\d{2}.html"
-    if re.search(
-        REPORT_FILENAME_PATTERN if report else LOG_FILENAME_PATTERN, file_name
-    ):
-        return True
 
+    for file in os.listdir(log_dir):
+        print(f"{file=}, {type(file)}")
+        if not re.search(LOG_FILENAME_PATTERN, file):
+            continue
+        _date = re.findall(r"\d{8}", file)[0]
 
-def get_file_date(file_name, report=False):
-    """Возвращает дату файла из названия"""
-    if report:
-        return re.findall(r"\d{4}.\d{2}.\d{2}", file_name)[0]
-    return re.findall(r"\d{8}", file_name)[0]
+        file_date = datetime.datetime.strptime(str(_date), "%Y%m%d")
 
-
-def get_last_file(files_paths, report=False):
-    """Возвращает самый 'свежий файл' из директории логов/отчетов"""
-    last_file = None
-    file_params = namedtuple("file_params", ["file_date", "path", "extension"])
-    for file in files_paths:
-        _file_date = get_file_date(file.name, report)
-        _, file_extension = os.path.splitext(file.name)
-        file_date = datetime.datetime.strptime(
-            _file_date, "%Y.%m.%d" if report else "%Y%m%d"
+        file_extensinsion = file.rsplit(".", 1)[-1]
+        current_file = file_params(
+            file_date, os.path.join(log_dir, file), file_extensinsion
         )
-        if not last_file:
-            last_file = file_params(file_date, file, file_extension)
+        if last_log_file:
+            if last_log_file.file_date < current_file.file_date:
+                last_log_file = current_file
         else:
-            if file_date > last_file.file_date:
-                last_file = file_params(file_date, file, file_extension)
-    return last_file
+            last_log_file = current_file
+    if last_log_file:
+        report_file_date = last_log_file.file_date.strftime("%Y.%m.%d")
+        report_filename = f"report-{report_file_date}.html"
 
-
-def get_file(dir, report=False):
-    """Поиск файлов в директориях названия которых соответствуют паттерну"""
-    files = [
-        file
-        for file in os.scandir(dir)
-        if checking_log_file_ext(file.name, report=report)
-    ]
-    if not files:
-        raise FileNotFoundError(f"Didn't find any files in {dir}")
-    return get_last_file(files, report)
+        return last_log_file, report_filename
+    else:
+        raise ValueError(f"Не найден файл логов в дерриктории {log_dir}")
 
 
 def read_log_file(log_file):
     """Построчно yield'ит строки из файла"""
-    open_file = {".gz": gzip.open, ".log": open}
+    open_file = {"gz": gzip.open, "log": open}
     with open_file[log_file.extension](log_file.path, "rb") as file:
         for line in file:
             try:
@@ -125,18 +92,6 @@ def read_log_file(log_file):
                 yield log_params(url, float(time))
             except ValueError:
                 yield None
-
-
-def files_comparison(log_file_date, report_file_date):
-    """Сравнение дат файла логов и отчета"""
-    try:
-        if log_file_date == report_file_date:
-            raise ValueError(
-                f"Отчетный файл уже существует!"
-            )
-    except AttributeError:
-        pass
-    return True
 
 
 def iterate_over_file(log_file, report_size, allowed_invalid_part):
@@ -165,11 +120,6 @@ def iterate_over_file(log_file, report_size, allowed_invalid_part):
     return normalize_report(statistics, total_line_count, count_valid, time_valid)
 
 
-def median(time):
-    """Выбор медианы"""
-    return sorted(time)[(len(time) // 2)]
-
-
 def normalize_report(statistics, total_line_count, count_valid, time_valid):
     stats = []
     for url, times in statistics.items():
@@ -186,52 +136,42 @@ def normalize_report(statistics, total_line_count, count_valid, time_valid):
     return stats
 
 
-def create_template(stats: log_stat):
+def render_template(path, stats):
     with open(TEMPLATE, "rb") as file:
         template = Template(file.read().decode("utf-8"))
-    return template.safe_substitute(
-        table_json=json.dumps([line._asdict() for line in stats])
-    )
 
-
-def write_template(path, stats):
     with open(path, "w") as file:
-        file.write(create_template(stats))
+        file.write(
+            template.safe_substitute(table_json=json.dumps([line for line in stats]))
+        )
+
+
+def init_config():
+    args = argparse.ArgumentParser()
+    args.add_argument("-fc", "--file_config", default="default_config.ini")
+    args = args.parse_args()
+    if not os.path.exists(args.file_config):
+        raise FileNotFoundError("Конфигурационный файл не найден")
+    config = configparser.ConfigParser()
+    config.read(args.file_config)
+
+    return config._sections["log_analyzer"]
+
+
+def file_processing(config):
+    log_filename, report_filename = find_last_log_file(config["log_dir"])
+    if os.path.exists(os.path.join(config["report_dir"], report_filename)):
+        raise ValueError("Отчетный файл уже существует")
+    stats = iterate_over_file(
+        log_filename, config["report_size"], config["allowed_invalid_part"]
+    )
+    render_template(os.path.join(config["report_dir"], report_filename), stats=stats)
 
 
 def main():
     config = init_config()
-    report_dir = config.get("log_analyzer", "REPORT_DIR")
-    if not os.path.exists(report_dir):
-        os.mkdir(report_dir)
-    try:
-        report_file = get_file(report_dir, report=True)
-        logger.info(
-            f"Последний отчетный файл найден в {os.path.join(config.get('log_analyzer', 'REPORT_DIR'), report_file.path)}"
-        )
-    except FileNotFoundError:
-        report_file = None
-        logger.info(
-            f"Не найден ни один отчетный файл в {config.get('log_analyzer', 'REPORT_DIR')}"
-        )
-    log_file = get_file(config.get("log_analyzer", "LOG_DIR"))
-    logger.info(
-        f'Лог-файл найден в {os.path.join(config.get("log_analyzer", "LOG_DIR"), log_file.path.name)}'
-    )
-    report_file_name = f"report-{log_file.file_date.strftime('%Y.%m.%d')}.html"
-    logger.info(f"Создаю отчетный файл report-{report_file_name}.html")
-    if files_comparison(log_file.file_date, report_file.file_date):
-        stats = iterate_over_file(
-            log_file,
-            config.get("log_analyzer", "REPORT_SIZE"),
-            config.get("log_analyzer", "ALLOWED_INVALID_PART"),
-        )
-
-        write_template(
-            os.path.join(config.get("log_analyzer", "REPORT_DIR"), report_file_name),
-            stats,
-        )
-        logger.info("Выполнено")
+    config = DEFAULT_CONFIG | config
+    file_processing(config)
 
 
 if __name__ == "__main__":
