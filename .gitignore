@@ -160,3 +160,4 @@ cython_debug/
 .idea/
 
 01_advanced_basics/log_analyzer/logs/
+.vscode
