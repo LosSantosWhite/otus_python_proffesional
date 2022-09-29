@@ -1,6 +1,8 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 import argparse
+from asyncio.log import logger
+from cmath import log
 import configparser
 import datetime
 import json
@@ -48,13 +50,18 @@ log_stat = namedtuple(
 
 file_params = namedtuple("file_params", ["file_date", "path", "extension"])
 
+def init_logging(config):
+    logger = logging.basicConfig(
+        filename=config.get('log_filename'),
+        level=config.get('logging_level')
+    )
+    return logger
 
 def find_last_log_file(log_dir):
     last_log_file = None
     LOG_FILENAME_PATTERN = r"nginx-access-ui\.log-(\d{8})\.(gz|log)"
 
     for file in os.listdir(log_dir):
-        print(f"{file=}, {type(file)}")
         if not re.search(LOG_FILENAME_PATTERN, file):
             continue
         _date = re.findall(r"\d{8}", file)[0]
@@ -171,6 +178,9 @@ def file_processing(config):
 def main():
     config = init_config()
     config = DEFAULT_CONFIG | config
+
+    logger = init_logging()
+    logger.info(f"Начинаю обрабатывать файл с кофинфигурацией {config}")
     file_processing(config)
 
 
