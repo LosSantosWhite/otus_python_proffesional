@@ -5,24 +5,20 @@ from unittest import mock
 
 from log_analyzer import find_last_log_file, file_processing, file_params
 
-valid_file = file_params(
-    file_date=datetime(2017, 6, 30),
-    path=os.path.join("tests", "logs", ".nginx-access-ui.log-20170630.gz"),
-    extension="gz",
-)
-invalid_file = file_params(
-    file_date=datetime(2017, 6, 30),
-    path=os.path.join(
-        "tests", "exceptions", "logs", ".nginx-access-ui.log-20170630.gz"
-    ),
-    extension="gz",
-)
+ABS_PATH_LOGS = os.path.join(os.path.abspath(__file__).rsplit('/', 1)[0], 'logs')
 
+print(ABS_PATH_LOGS)
+
+VALID_FILE = file_params(
+    file_date=datetime(2017, 6, 30),
+    path=os.path.join(ABS_PATH_LOGS, ".nginx-access-ui.log-20170630.gz"),
+    extension="gz",
+)
 
 @pytest.mark.parametrize(
     "log_dir,result",
     [
-        (os.path.join("tests", "logs"), (valid_file, "report-2017.06.30.html")),
+        (ABS_PATH_LOGS, (VALID_FILE, "report-2017.06.30.html")),
     ],
 )
 def test_find_last_log_file(log_dir, result):
@@ -34,8 +30,8 @@ def test_find_last_log_file(log_dir, result):
     [
         (
             {
-                "log_dir": os.path.join("tests", "logs", "exceptions", "logs"),
-                "report_dir": os.path.join("tests", "logs", "exceptions", "report_dir"),
+                "log_dir": os.path.join(ABS_PATH_LOGS, "exceptions", "logs"),
+                "report_dir": os.path.join("exceptions", "report_dir"),
             }
         ),
     ],

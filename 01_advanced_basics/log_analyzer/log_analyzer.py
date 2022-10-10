@@ -60,7 +60,7 @@ def init_logging(config):
 def find_last_log_file(log_dir):
     last_log_file = None
     LOG_FILENAME_PATTERN = r"nginx-access-ui\.log-(\d{8})\.(gz|log)"
-
+    print(log_dir)
     for file in os.listdir(log_dir):
         if not re.search(LOG_FILENAME_PATTERN, file):
             continue
